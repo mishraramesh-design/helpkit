@@ -84,10 +84,15 @@ export default function Project() {
 }
 
 function IngestTab({ project, reload, S, fileRef }) {
+  const [hasLlm, setHasLlm] = useState(null)
   const [ghUrl, setGhUrl]   = useState('')
   const [ghTok, setGhTok]   = useState('')
   const [docType, setDocType] = useState('manual')
   const [status, setStatus] = useState('')
+
+  useEffect(() => {
+    API.get('/config').then(c => setHasLlm(!!c?.api_key))
+  }, [])
 
   const uploadPdf = async (e) => {
     const file = e.target.files[0]; if (!file) return
@@ -107,6 +112,12 @@ function IngestTab({ project, reload, S, fileRef }) {
   }
 
   return <>
+    {hasLlm === false && (
+      <div style={{ background:'#FEF2F2', border:'1.5px solid #FCA5A5', borderRadius:8, padding:'12px 16px', marginBottom:16, fontSize:13, color:'#991B1B' }}>
+        ⚠ <b>No LLM key configured.</b> Ingestion will extract text but cannot build Q&A pairs without an AI model.
+        {' '}<a href="/settings" style={{ color:'#991B1B', fontWeight:700 }}>Go to Settings → add a Groq key first</a>
+      </div>
+    )}
     <div style={S.card}>
       <div style={{ fontWeight:700, fontSize:15, marginBottom:14 }}>📄 Upload Document</div>
       <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:10 }}>
@@ -117,8 +128,8 @@ function IngestTab({ project, reload, S, fileRef }) {
           <option value="faq">FAQ</option>
           <option value="other">Other</option>
         </select>
-        <input ref={fileRef} type="file" accept=".pdf" style={{ display:'none' }} onChange={uploadPdf} />
-        <button style={S.btn} onClick={() => fileRef.current.click()}>Choose PDF &amp; Upload</button>
+        <input ref={fileRef} type="file" accept=".pdf,.docx,.doc" style={{ display:'none' }} onChange={uploadPdf} />
+        <button style={S.btn} onClick={() => fileRef.current.click()}>Choose PDF / DOCX &amp; Upload</button>
       </div>
       <div style={{ fontSize:12, color:'#747480' }}>AI will extract Q&amp;A pairs from the PDF to build the assistant knowledge base.</div>
     </div>
