@@ -11,6 +11,13 @@ export default function Projects() {
   const load = () => API.get('/projects').then(setProjects)
   useEffect(() => { load() }, [])
 
+  const deleteProject = async (e, id) => {
+    e.stopPropagation()
+    if (!window.confirm('Delete this project and all its data?')) return
+    await API.del(`/projects/${id}`)
+    load()
+  }
+
   const create = async (e) => {
     e.preventDefault()
     const p = await API.post('/projects', form)
@@ -61,13 +68,20 @@ export default function Projects() {
           <div style={{ fontSize:32, marginBottom:10 }}>📱</div>
           <div style={{ fontWeight:700, fontSize:16, marginBottom:4 }}>{p.name}</div>
           <div style={{ fontSize:12, color:'#747480', marginBottom:14 }}>{p.description || 'No description'}</div>
-          <div style={{ display:'flex', gap:8 }}>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             <span style={{ fontSize:11, background:'#F0FDF4', color:'#16a34a', borderRadius:4, padding:'2px 8px', fontWeight:600 }}>
               🤖 Assistant ready
             </span>
             <span style={{ fontSize:11, background:'#EFF6FF', color:'#0284c7', borderRadius:4, padding:'2px 8px', fontWeight:600 }}>
               🎧 Support ready
             </span>
+            <button
+              onClick={e => deleteProject(e, p.id)}
+              title="Delete project"
+              style={{ marginLeft:'auto', padding:'3px 10px', background:'#FEF2F2', border:'1.5px solid #FECACA',
+                borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer', color:'#dc2626' }}>
+              🗑
+            </button>
           </div>
         </div>
       ))}

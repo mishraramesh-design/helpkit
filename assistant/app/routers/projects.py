@@ -31,7 +31,10 @@ async def create_project(body: dict = Body(...), _=Depends(require_admin)):
 async def get_project(pid: str, _=Depends(require_admin)):
     p = await db.projects.find_one({"id": pid}, {"_id":0})
     if not p: return {"error": "not found"}, 404
-    docs = [d async for d in db.documents.find({"project_id": pid}, {"_id":0})]
+    docs = []
+    async for d in db.documents.find({"project_id": pid}):
+        d["id"] = d.pop("_id")   # expose _id as "id" so frontend can use d.id
+        docs.append(d)
     kb_count = await db.assistant_kb.count_documents({"project_id": pid})
     sup_count = await db.support_messages.count_documents({"project_id": pid, "status": "approved"})
     return {**p, "documents": docs, "assistant_kb_entries": kb_count, "support_kb_entries": sup_count}

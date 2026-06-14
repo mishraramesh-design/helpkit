@@ -116,22 +116,22 @@ function IngestTab({ project, reload, S, fileRef }) {
   }
 
   const rescan = async (doc) => {
-    const tok = rescanTok[doc._id] ?? ''
-    setRSt(s => ({...s, [doc._id]: '⏳ Queued…'}))
+    const tok = rescanTok[doc.id] ?? ''
+    setRSt(s => ({...s, [doc.id]: '⏳ Queued…'}))
     try {
       const body = doc.type === 'github' && tok ? { token: tok } : {}
-      const r = await API.post(`/projects/${project.id}/documents/${doc._id}/rescan`, body)
-      setRSt(s => ({...s, [doc._id]: r.ok ? '✓ Re-scanning…' : `✗ ${r.detail || r.error}`}))
-      setTimeout(() => { setRSt(s => ({...s, [doc._id]: ''})); reload() }, 3000)
+      const r = await API.post(`/projects/${project.id}/documents/${doc.id}/rescan`, body)
+      setRSt(s => ({...s, [doc.id]: r.ok ? '✓ Re-scanning…' : `✗ ${r.detail || r.error}`}))
+      setTimeout(() => { setRSt(s => ({...s, [doc.id]: ''})); reload() }, 3000)
     } catch(e) {
-      setRSt(s => ({...s, [doc._id]: `✗ ${e}`}))
+      setRSt(s => ({...s, [doc.id]: `✗ ${e}`}))
     }
   }
 
   const deleteDoc = async (doc) => {
     if (!window.confirm(`Delete "${doc.filename?.split('/').pop()}" and all its KB entries?`)) return
-    setDel(s => ({...s, [doc._id]: true}))
-    await API.del(`/projects/${project.id}/documents/${doc._id}`)
+    setDel(s => ({...s, [doc.id]: true}))
+    await API.del(`/projects/${project.id}/documents/${doc.id}`)
     reload()
   }
 
@@ -207,7 +207,7 @@ function IngestTab({ project, reload, S, fileRef }) {
           </thead>
           <tbody>
             {project.documents.map((d) => (
-              <tr key={d._id}>
+              <tr key={d.id}>
                 <td style={S.td}>
                   <b style={{ fontSize:12 }}>{d.filename?.split('/').pop() || d.filename}</b>
                   {/* Token override for private GitHub repos that 401'd */}
@@ -216,8 +216,8 @@ function IngestTab({ project, reload, S, fileRef }) {
                       <input
                         type="password"
                         placeholder="Enter GitHub token to fix 401"
-                        value={rescanTok[d._id] || ''}
-                        onChange={e => setRTok(t => ({...t, [d._id]: e.target.value}))}
+                        value={rescanTok[d.id] || ''}
+                        onChange={e => setRTok(t => ({...t, [d.id]: e.target.value}))}
                         style={{ fontSize:11, padding:'4px 8px', border:'1.5px solid #FCA5A5', borderRadius:6, width:'100%', boxSizing:'border-box' }}
                       />
                     </div>
@@ -245,17 +245,17 @@ function IngestTab({ project, reload, S, fileRef }) {
                     </button>
                     <button
                       onClick={() => deleteDoc(d)}
-                      disabled={deleting[d._id]}
+                      disabled={deleting[d.id]}
                       title="Delete this source and all its KB entries"
                       style={{ padding:'4px 10px', background:'#FEF2F2', border:'1.5px solid #FECACA',
                         borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer', color:'#dc2626',
-                        opacity: deleting[d._id] ? 0.5 : 1 }}>
+                        opacity: deleting[d.id] ? 0.5 : 1 }}>
                       🗑 Delete
                     </button>
                   </div>
-                  {rescanSt[d._id] && (
-                    <div style={{ fontSize:10, marginTop:4, color: rescanSt[d._id].startsWith('✓') ? '#16a34a' : '#dc2626' }}>
-                      {rescanSt[d._id]}
+                  {rescanSt[d.id] && (
+                    <div style={{ fontSize:10, marginTop:4, color: rescanSt[d.id].startsWith('✓') ? '#16a34a' : '#dc2626' }}>
+                      {rescanSt[d.id]}
                     </div>
                   )}
                 </td>
@@ -336,7 +336,23 @@ function SupportKBTab({ pid, S, reload }) {
 
     {activeView === 'pending' && <>
       {messages.length === 0
-        ? <div style={{ padding:40, textAlign:'center', color:'#747480' }}>No pending messages. Scan a GitHub repo in the Ingest tab first.</div>
+        ? <div style={{ padding:32, background:'#F6F6FA', borderRadius:10, border:'1.5px solid #E1E1E6' }}>
+            <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>🎧 Support KB Build Flow</div>
+            {[
+              {step:'1', label:'Scan GitHub repo', desc:'Ingest tab → repo URL + GitHub token (required for private repos) → Scan repo'},
+              {step:'2', label:'Review messages', desc:'Error codes and HTTP exceptions appear here. Approve ones you want in the KB.'},
+              {step:'3', label:'Build Support KB', desc:'Click "Build KB →" above. AI generates context, severity, and recommended action per message.'},
+            ].map(({step,label,desc}) => (
+              <div key={step} style={{ display:'flex', gap:12, padding:'10px 0', borderBottom:'1px solid #E1E1E6' }}>
+                <div style={{ width:26, height:26, borderRadius:'50%', background:'#FFE600', display:'flex', alignItems:'center',
+                  justifyContent:'center', fontWeight:800, fontSize:12, flexShrink:0 }}>{step}</div>
+                <div><b style={{ fontSize:13 }}>{label}</b><div style={{ fontSize:12, color:'#747480', marginTop:2 }}>{desc}</div></div>
+              </div>
+            ))}
+            <div style={{ fontSize:12, color:'#747480', marginTop:10 }}>
+              For private repos: re-scan via Ingest tab with your GitHub PAT. Scanner detects <code>raise HTTPException(...)</code> and structured codes like APP-001.
+            </div>
+          </div>
         : <div style={S.card}>
           <table style={S.table}>
             <thead><tr><th style={S.th}>ID</th><th style={S.th}>File</th><th style={S.th}>Message</th><th style={S.th}></th></tr></thead>
