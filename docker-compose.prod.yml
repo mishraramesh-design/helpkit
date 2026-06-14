@@ -1,0 +1,66 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────
+#  HelpKit — Production Compose for Hostinger VPS
+#  Usage:
+#    1. Copy this file to your VPS: /opt/helpkit/docker-compose.yml
+#    2. Create /opt/helpkit/.env  (see variables below)
+#    3. docker compose up -d --build
+#
+#  Ports exposed:
+#    8091 → Admin UI   (http://93.127.194.188:8091)
+#    8092 → Widget API (http://93.127.194.188:8092)
+#    MongoDB stays internal (no external port)
+# ─────────────────────────────────────────────────────────────────
+
+services:
+
+  mongo:
+    image: mongo:7
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    networks: [hk]
+    # No ports: block — MongoDB never exposed publicly
+
+  assistant:
+    build:
+      context: ./assistant
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: helpkit
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-hk-admin-token}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+    ports:
+      - "8092:8000"
+    depends_on:
+      - mongo
+    networks: [hk]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: http://${VPS_IP:-93.127.194.188}:8092
+    restart: always
+    ports:
+      - "8091:80"
+    depends_on:
+      - assistant
+    networks: [hk]
+
+volumes:
+  mongo_data:
+    driver: local
+
+networks:
+  hk:
+    driver: bridge
