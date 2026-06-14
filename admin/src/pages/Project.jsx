@@ -52,7 +52,7 @@ export default function Project() {
         <div style={{ fontSize:13, color:'#747480' }}>{project.description}</div>
         <div style={{ display:'flex', gap:8, marginTop:8 }}>
           <span style={S.chip('green')}>🤖 {project.assistant_kb_entries} assistant KB entries</span>
-          <span style={S.chip('blue')}>🎧 {project.support_kb_entries} support KB entries</span>
+          <span style={S.chip('blue')}>🎧 {project.support_kb_entries} support KB{project.support_kb_pending > 0 ? ` · ${project.support_kb_pending} pending` : ''}</span>
         </div>
       </div>
     </div>

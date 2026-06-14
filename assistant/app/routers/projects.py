@@ -36,8 +36,9 @@ async def get_project(pid: str, _=Depends(require_admin)):
         d["id"] = d.pop("_id")   # expose _id as "id" so frontend can use d.id
         docs.append(d)
     kb_count = await db.assistant_kb.count_documents({"project_id": pid})
-    sup_count = await db.support_messages.count_documents({"project_id": pid, "status": "approved"})
-    return {**p, "documents": docs, "assistant_kb_entries": kb_count, "support_kb_entries": sup_count}
+    sup_count = await db.support_kb.count_documents({"project_id": pid})
+    pending_count = await db.support_messages.count_documents({"project_id": pid, "status": "approved"})
+    return {**p, "documents": docs, "assistant_kb_entries": kb_count, "support_kb_entries": sup_count, "support_kb_pending": pending_count}
 
 @router.delete("/{pid}")
 async def delete_project(pid: str, _=Depends(require_admin)):
