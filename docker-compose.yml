@@ -1,0 +1,43 @@
+version: "3.9"
+services:
+  mongo:
+    image: mongo:7
+    volumes: [mongo_data:/data/db]
+    networks: [hk]
+
+  assistant:
+    build: ./assistant
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: helpkit
+      SECRET_KEY: ${SECRET_KEY:-changeme}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-hk-admin-token}
+    ports: ["8092:8000"]
+    depends_on: [mongo]
+    networks: [hk]
+
+  support:
+    build: ./support
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: helpkit_support
+      SECRET_KEY: ${SECRET_KEY:-changeme}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-hk-admin-token}
+      REPO_DIR: /repos
+    volumes: [repo_cache:/repos]
+    ports: ["8090:8000"]
+    depends_on: [mongo]
+    networks: [hk]
+
+  admin:
+    build: ./admin
+    ports: ["8091:80"]
+    depends_on: [assistant, support]
+    networks: [hk]
+
+volumes:
+  mongo_data:
+  repo_cache:
+
+networks:
+  hk:
