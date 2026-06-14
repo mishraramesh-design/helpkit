@@ -84,11 +84,14 @@ export default function Project() {
 }
 
 function IngestTab({ project, reload, S, fileRef }) {
-  const [hasLlm, setHasLlm] = useState(null)
-  const [ghUrl, setGhUrl]   = useState('')
-  const [ghTok, setGhTok]   = useState('')
-  const [docType, setDocType] = useState('manual')
-  const [status, setStatus] = useState('')
+  const [hasLlm, setHasLlm]   = useState(null)
+  const [ghUrl, setGhUrl]      = useState('')
+  const [ghTok, setGhTok]      = useState('')
+  const [docType, setDocType]  = useState('manual')
+  const [status, setStatus]    = useState('')
+  const [rescanTok, setRTok]   = useState({})   // {doc_id: token} for per-row token override
+  const [rescanSt, setRSt]     = useState({})   // {doc_id: 'status string'}
+  const [deleting, setDel]     = useState({})   // {doc_id: true}
 
   useEffect(() => {
     API.get('/config').then(c => setHasLlm(!!c?.api_key))
@@ -108,16 +111,44 @@ function IngestTab({ project, reload, S, fileRef }) {
     setStatus('Starting GitHub scan…')
     const r = await API.post(`/projects/${project.id}/ingest/github`, { repo_url: ghUrl, token: ghTok })
     setStatus(r.status === 'queued' ? '✓ Scan started — check back in ~60s' : `Error: ${JSON.stringify(r)}`)
+    setGhUrl(''); setGhTok('')
     reload()
   }
+
+  const rescan = async (doc) => {
+    const tok = rescanTok[doc._id] ?? ''
+    setRSt(s => ({...s, [doc._id]: '⏳ Queued…'}))
+    try {
+      const body = doc.type === 'github' && tok ? { token: tok } : {}
+      const r = await API.post(`/projects/${project.id}/documents/${doc._id}/rescan`, body)
+      setRSt(s => ({...s, [doc._id]: r.ok ? '✓ Re-scanning…' : `✗ ${r.detail || r.error}`}))
+      setTimeout(() => { setRSt(s => ({...s, [doc._id]: ''})); reload() }, 3000)
+    } catch(e) {
+      setRSt(s => ({...s, [doc._id]: `✗ ${e}`}))
+    }
+  }
+
+  const deleteDoc = async (doc) => {
+    if (!window.confirm(`Delete "${doc.filename?.split('/').pop()}" and all its KB entries?`)) return
+    setDel(s => ({...s, [doc._id]: true}))
+    await API.del(`/projects/${project.id}/documents/${doc._id}`)
+    reload()
+  }
+
+  const statusColor = (st) =>
+    st?.startsWith('ingested') || st === 'scanned' ? '#16a34a'
+    : st?.startsWith('error') ? '#dc2626'
+    : '#d97706'
 
   return <>
     {hasLlm === false && (
       <div style={{ background:'#FEF2F2', border:'1.5px solid #FCA5A5', borderRadius:8, padding:'12px 16px', marginBottom:16, fontSize:13, color:'#991B1B' }}>
-        ⚠ <b>No LLM key configured.</b> Ingestion will extract text but cannot build Q&A pairs without an AI model.
-        {' '}<a href="/settings" style={{ color:'#991B1B', fontWeight:700 }}>Go to Settings → add a Groq key first</a>
+        ⚠ <b>No LLM key configured.</b> Ingestion will fail.{' '}
+        <a href="/settings" style={{ color:'#991B1B', fontWeight:700 }}>Go to Settings and add a Groq key first →</a>
       </div>
     )}
+
+    {/* Upload PDF/DOCX */}
     <div style={S.card}>
       <div style={{ fontWeight:700, fontSize:15, marginBottom:14 }}>📄 Upload Document</div>
       <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:10 }}>
@@ -131,35 +162,109 @@ function IngestTab({ project, reload, S, fileRef }) {
         <input ref={fileRef} type="file" accept=".pdf,.docx,.doc" style={{ display:'none' }} onChange={uploadPdf} />
         <button style={S.btn} onClick={() => fileRef.current.click()}>Choose PDF / DOCX &amp; Upload</button>
       </div>
-      <div style={{ fontSize:12, color:'#747480' }}>AI will extract Q&amp;A pairs from the PDF to build the assistant knowledge base.</div>
+      <div style={{ fontSize:12, color:'#747480' }}>AI extracts Q&amp;A pairs to build the assistant knowledge base.</div>
     </div>
 
+    {/* GitHub scan */}
     <div style={S.card}>
       <div style={{ fontWeight:700, fontSize:15, marginBottom:14 }}>🐙 GitHub Repository Scan</div>
-      <input value={ghUrl} onChange={e => setGhUrl(e.target.value)} placeholder="https://github.com/org/repo"
-        style={{ ...S.input, marginBottom:10 }} />
-      <input value={ghTok} onChange={e => setGhTok(e.target.value)} type="password" placeholder="GitHub token (optional — for private repos)"
-        style={{ ...S.input, marginBottom:10 }} />
-      <button style={S.btn} onClick={scanGithub}>Scan for error codes →</button>
-      <div style={{ fontSize:12, color:'#747480', marginTop:8 }}>Scans source files for error/exception codes (e.g. APP-001) to build the L1/L2/L3 support knowledge base.</div>
+      <div style={{ marginBottom:10 }}>
+        <input value={ghUrl} onChange={e => setGhUrl(e.target.value)}
+          placeholder="https://github.com/org/repo"
+          style={{ ...S.input, marginBottom:8 }} />
+        <input value={ghTok} onChange={e => setGhTok(e.target.value)} type="password"
+          placeholder="GitHub Personal Access Token — required for private repos"
+          style={{ ...S.input, marginBottom:4 }} />
+        <div style={{ fontSize:11, color:'#747480' }}>
+          Private repo? Create a PAT at{' '}
+          <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">
+            github.com/settings/tokens
+          </a>{' '}with <b>repo (read)</b> scope. The token is stored so re-scans work automatically.
+        </div>
+      </div>
+      <button style={S.btn} onClick={scanGithub} disabled={!ghUrl}>Scan repo →</button>
     </div>
 
-    {status && <div style={{ padding:'10px 14px', background:'#F0FDF4', borderRadius:8, fontSize:12.5, color:'#16a34a', marginBottom:16 }}>{status}</div>}
+    {status && (
+      <div style={{ padding:'10px 14px', background:'#F0FDF4', borderRadius:8, fontSize:12.5, color:'#16a34a', marginBottom:16 }}>
+        {status}
+      </div>
+    )}
 
-    {project.documents?.length > 0 && <div style={S.card}>
-      <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>Ingested Sources</div>
-      <table style={S.table}>
-        <thead><tr><th style={S.th}>File</th><th style={S.th}>Type</th><th style={S.th}>Status</th><th style={S.th}>Output</th></tr></thead>
-        <tbody>{project.documents.map((d, i) => (
-          <tr key={i}>
-            <td style={S.td}><b>{d.filename?.split('/').pop()}</b></td>
-            <td style={S.td}>{d.type}</td>
-            <td style={S.td}><span style={{ fontSize:11, fontWeight:700, color: d.status?.startsWith('ingested')||d.status==='scanned'?'#16a34a':d.status?.startsWith('error')?'#dc2626':'#747480' }}>{d.status}</span></td>
-            <td style={S.td}><span style={{ fontSize:11, color:'#747480' }}>{d.qa_pairs ? `${d.qa_pairs} Q&As` : d.messages_found ? `${d.messages_found} messages` : '—'}</span></td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>}
+    {/* Ingested sources table */}
+    {project.documents?.length > 0 && (
+      <div style={S.card}>
+        <div style={{ fontWeight:700, fontSize:14, marginBottom:12 }}>Ingested Sources</div>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>File / URL</th>
+              <th style={S.th}>Type</th>
+              <th style={S.th}>Status</th>
+              <th style={S.th}>Output</th>
+              <th style={S.th}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {project.documents.map((d) => (
+              <tr key={d._id}>
+                <td style={S.td}>
+                  <b style={{ fontSize:12 }}>{d.filename?.split('/').pop() || d.filename}</b>
+                  {/* Token override for private GitHub repos that 401'd */}
+                  {d.type === 'github' && d.status?.startsWith('error') && d.status.includes('401') && (
+                    <div style={{ marginTop:5 }}>
+                      <input
+                        type="password"
+                        placeholder="Enter GitHub token to fix 401"
+                        value={rescanTok[d._id] || ''}
+                        onChange={e => setRTok(t => ({...t, [d._id]: e.target.value}))}
+                        style={{ fontSize:11, padding:'4px 8px', border:'1.5px solid #FCA5A5', borderRadius:6, width:'100%', boxSizing:'border-box' }}
+                      />
+                    </div>
+                  )}
+                </td>
+                <td style={S.td}><span style={{ fontSize:11 }}>{d.type}</span></td>
+                <td style={S.td}>
+                  <span style={{ fontSize:11, fontWeight:700, color: statusColor(d.status) }}>
+                    {d.status}
+                  </span>
+                </td>
+                <td style={S.td}>
+                  <span style={{ fontSize:11, color:'#747480' }}>
+                    {d.qa_pairs ? `${d.qa_pairs} Q&As` : d.messages_found ? `${d.messages_found} msgs` : '—'}
+                  </span>
+                </td>
+                <td style={S.td}>
+                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                    <button
+                      onClick={() => rescan(d)}
+                      title="Re-ingest this source (wipes old KB entries)"
+                      style={{ padding:'4px 10px', background:'#EFF6FF', border:'1.5px solid #BFDBFE',
+                        borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer', color:'#1d4ed8' }}>
+                      ↻ Re-scan
+                    </button>
+                    <button
+                      onClick={() => deleteDoc(d)}
+                      disabled={deleting[d._id]}
+                      title="Delete this source and all its KB entries"
+                      style={{ padding:'4px 10px', background:'#FEF2F2', border:'1.5px solid #FECACA',
+                        borderRadius:6, fontSize:11, fontWeight:700, cursor:'pointer', color:'#dc2626',
+                        opacity: deleting[d._id] ? 0.5 : 1 }}>
+                      🗑 Delete
+                    </button>
+                  </div>
+                  {rescanSt[d._id] && (
+                    <div style={{ fontSize:10, marginTop:4, color: rescanSt[d._id].startsWith('✓') ? '#16a34a' : '#dc2626' }}>
+                      {rescanSt[d._id]}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
   </>
 }
 

@@ -9,8 +9,10 @@ const PROVIDERS = [
 ]
 
 export default function Settings() {
-  const [cfg, setCfg]     = useState({ provider:'groq', api_key:'', model:'', base_url:'' })
-  const [saved, setSaved] = useState(false)
+  const [cfg, setCfg]         = useState({ provider:'groq', api_key:'', model:'', base_url:'' })
+  const [saved, setSaved]     = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTest] = useState(null)  // {ok, reply?, error?}
 
   useEffect(() => { API.get('/config').then(c => setCfg(c || {})) }, [])
 
@@ -21,14 +23,29 @@ export default function Settings() {
     if (!body.base_url && prov.url) body.base_url = prov.url
     if (!body.model && prov.models[0]) body.model = prov.models[0]
     await API.put('/config', body)
-    setSaved(true); setTimeout(() => setSaved(false), 2000)
+    setSaved(true); setTest(null)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const testConnection = async () => {
+    setTesting(true); setTest(null)
+    try {
+      const res = await API.post('/config/test', {})
+      setTest(res)
+    } catch(e) {
+      setTest({ ok: false, error: String(e) })
+    } finally {
+      setTesting(false)
+    }
   }
 
   const S = {
-    card: { background:'#fff', borderRadius:10, padding:28, boxShadow:'0 1px 8px rgba(0,0,0,0.07)', marginBottom:20 },
-    label: { fontSize:12, fontWeight:700, color:'#747480', marginBottom:5, display:'block' },
-    input: { width:'100%', padding:'9px 12px', border:'1.5px solid #E1E1E6', borderRadius:8, fontSize:13, boxSizing:'border-box', outline:'none' },
+    card:   { background:'#fff', borderRadius:10, padding:28, boxShadow:'0 1px 8px rgba(0,0,0,0.07)', marginBottom:20 },
+    label:  { fontSize:12, fontWeight:700, color:'#747480', marginBottom:5, display:'block' },
+    input:  { width:'100%', padding:'9px 12px', border:'1.5px solid #E1E1E6', borderRadius:8, fontSize:13, boxSizing:'border-box', outline:'none' },
     select: { width:'100%', padding:'9px 12px', border:'1.5px solid #E1E1E6', borderRadius:8, fontSize:13, boxSizing:'border-box', background:'#fff' },
+    btnPrimary: { padding:'10px 28px', background:'#FFE600', border:'none', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer' },
+    btnTest: { padding:'10px 22px', background:'#F6F6FA', border:'1.5px solid #E1E1E6', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer' },
   }
 
   return <>
@@ -67,11 +84,31 @@ export default function Settings() {
             onChange={e => setCfg({...cfg, base_url:e.target.value})} />
         </div>}
       </div>
-      <button onClick={save} style={{ marginTop:20, padding:'10px 28px', background:'#FFE600',
-        border:'none', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer' }}>
-        {saved ? '✓ Saved' : 'Save'}
-      </button>
+
+      {/* Actions row */}
+      <div style={{ display:'flex', gap:10, alignItems:'center', marginTop:20, flexWrap:'wrap' }}>
+        <button onClick={save} style={S.btnPrimary}>
+          {saved ? '✓ Saved' : 'Save'}
+        </button>
+        <button onClick={testConnection} disabled={testing} style={{ ...S.btnTest, opacity: testing ? 0.6 : 1 }}>
+          {testing ? '⏳ Testing…' : '⚡ Test connection'}
+        </button>
+        {testResult && (
+          <div style={{
+            padding:'9px 14px', borderRadius:8, fontSize:13, fontWeight:600,
+            background: testResult.ok ? '#F0FDF4' : '#FFF0F0',
+            color:      testResult.ok ? '#16a34a' : '#dc2626',
+            border:     testResult.ok ? '1.5px solid #86EFAC' : '1.5px solid #FECACA',
+            flex:1, minWidth:200
+          }}>
+            {testResult.ok
+              ? `✓ ${testResult.reply}`
+              : `✗ ${testResult.error}`}
+          </div>
+        )}
+      </div>
     </div>
+
     <div style={{ ...S.card, background:'#FFF8DC', border:'1.5px solid #FFE600' }}>
       <div style={{ fontWeight:700, marginBottom:8 }}>💡 Recommended: Groq</div>
       <div style={{ fontSize:13, lineHeight:1.6, color:'#3C3C48' }}>

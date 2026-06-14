@@ -1,6 +1,6 @@
 """Project CRUD — each project = one target application."""
 import os, uuid
-from fastapi import APIRouter, Depends, Body, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Body, BackgroundTasks, UploadFile, File, Form, HTTPException
 from ..core import db, require_admin, new_api_key
 from ..ingest import ingest_pdf, ingest_github
 from datetime import datetime, timezone
@@ -54,8 +54,12 @@ async def upload_pdf(pid: str, bg: BackgroundTasks, doc_type: str = Form("manual
     with open(path, "wb") as f:
         content = await file.read()
         f.write(content)
-    doc = {"_id": doc_id, "project_id": pid, "type": doc_type,
-           "filename": file.filename, "path": path, "status": "queued", "created_at": NOW()}
+    doc = {
+        "_id": doc_id, "project_id": pid, "type": doc_type,
+        "filename": file.filename,
+        "path": path,          # stored for re-scan
+        "status": "queued", "created_at": NOW()
+    }
     await db.documents.insert_one(doc)
     bg.add_task(ingest_pdf, pid, doc_id, path, doc_type)
     return {"doc_id": doc_id, "status": "queued"}
@@ -63,8 +67,55 @@ async def upload_pdf(pid: str, bg: BackgroundTasks, doc_type: str = Form("manual
 @router.post("/{pid}/ingest/github")
 async def ingest_repo(pid: str, bg: BackgroundTasks, body: dict = Body(...), _=Depends(require_admin)):
     doc_id = str(uuid.uuid4())[:12]
-    doc = {"_id": doc_id, "project_id": pid, "type": "github",
-           "filename": body.get("repo_url",""), "status": "queued", "created_at": NOW()}
+    repo_url = body.get("repo_url", "")
+    token    = body.get("token", "")
+    doc = {
+        "_id": doc_id, "project_id": pid, "type": "github",
+        "filename": repo_url,
+        "github_url": repo_url,   # stored for re-scan
+        "github_token": token,    # stored for re-scan (private repos)
+        "status": "queued", "created_at": NOW()
+    }
     await db.documents.insert_one(doc)
-    bg.add_task(ingest_github, pid, doc_id, body.get("repo_url",""), body.get("token",""))
+    bg.add_task(ingest_github, pid, doc_id, repo_url, token)
     return {"doc_id": doc_id, "status": "queued"}
+
+# ── Per-document: Re-scan ────────────────────────────────────────────────────
+@router.post("/{pid}/documents/{doc_id}/rescan")
+async def rescan_document(pid: str, doc_id: str, bg: BackgroundTasks,
+                          body: dict = Body(default={}), _=Depends(require_admin)):
+    """Re-ingest an existing document, wiping its old KB entries first."""
+    doc = await db.documents.find_one({"_id": doc_id, "project_id": pid})
+    if not doc:
+        raise HTTPException(404, "Document not found")
+
+    # Wipe old KB entries generated from this document
+    await db.assistant_kb.delete_many({"doc_id": doc_id})
+    await db.support_messages.delete_many({"doc_id": doc_id})
+    await db.documents.update_one({"_id": doc_id}, {"$set": {"status": "queued"}})
+
+    if doc["type"] == "github":
+        # Allow caller to supply/update token (e.g. user just added one)
+        token = body.get("token") or doc.get("github_token", "")
+        if body.get("token"):
+            await db.documents.update_one({"_id": doc_id}, {"$set": {"github_token": token}})
+        url = doc.get("github_url") or doc.get("filename", "")
+        bg.add_task(ingest_github, pid, doc_id, url, token)
+    else:
+        path = doc.get("path")
+        if not path or not os.path.exists(path):
+            raise HTTPException(422, "Original file not available — please upload again")
+        bg.add_task(ingest_pdf, pid, doc_id, path, doc.get("type", "manual"))
+
+    return {"ok": True, "status": "queued"}
+
+# ── Per-document: Delete ─────────────────────────────────────────────────────
+@router.delete("/{pid}/documents/{doc_id}")
+async def delete_document(pid: str, doc_id: str, _=Depends(require_admin)):
+    """Remove a document and all KB entries derived from it."""
+    result = await db.documents.delete_one({"_id": doc_id, "project_id": pid})
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Document not found")
+    await db.assistant_kb.delete_many({"doc_id": doc_id})
+    await db.support_messages.delete_many({"doc_id": doc_id})
+    return {"ok": True}
